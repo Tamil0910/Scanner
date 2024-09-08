@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Scanner with Decryption (Mobile Optimized)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin-top: 20px;
+        }
+        #video {
+            width: 100%;
+            max-width: 400px; /* Adjust this value for your design */
+            height: auto;
+            border: 2px solid black;
+            display: block;
+            margin: 0 auto;
+        }
+        #result {
+            margin-top: 20px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        table {
+            margin-top: 20px;
+            border-collapse: collapse;
+            width: 60%;
+            margin-left: auto;
+            margin-right: auto;
+            display: none; /* Initially hide the table */
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        #playButton {
+            display: none;
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+</head>
+<body>
+    <h1>QR Code Scanner with Decryption</h1>
+    <video id="video" autoplay></video>
+    <div id="result">Scanning for QR code...</div>
+
+    <!-- Play Button Fallback for Mobile Devices -->
+    <button id="playButton">Start Scanning</button>
+
+    <!-- Table to display decrypted data -->
+    <table id="dataTable">
+        <thead>
+            <tr>
+                <th>Label</th>
+                <th>Value</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+        </tbody>
+    </table>
+
+    <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+    <script>
+        const video = document.getElementById('video');
+        const resultElement = document.getElementById('result');
+        const dataTable = document.getElementById('dataTable');
+        const tableBody = document.getElementById('tableBody');
+        const playButton = document.getElementById('playButton');
+        const decryptionKey = "GCE-Dharmapuri"; // The key used for encryption
+        let lastScanTime = 0;
+        const scanInterval = 500; // 500ms between scans
+        let tableData = {};
+
+        // Function to request camera access and stream video to the video element
+        function startVideo() {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                    .then(stream => {
+                        video.srcObject = stream;
+                        video.play();
+                        playButton.style.display = 'none'; // Hide play button if video plays
+                    })
+                    .catch(err => {
+                        console.error("Error accessing camera: ", err);
+                        resultElement.textContent = "Error accessing camera. Please allow camera access.";
+                    });
+            } else {
+                resultElement.textContent = "Your device does not support camera access.";
+            }
+        }
+
+        // Function to decrypt QR code data
+        function decryptData(encryptedData, key) {
+            // Decrypt with CryptoJS AES
+            const decrypted = CryptoJS.AES.decrypt(encryptedData, key);
+            const decryptedText = decrypted.toString(CryptoJS.enc.Utf8); // Get decrypted UTF-8 string
+            return decryptedText;
+        }
+
+        // Function to display JSON data in the table with custom labels
+        function displayDataInTable(data) {
+            // Clear existing table rows
+            tableBody.innerHTML = '';
+
+            // Create table rows for each key-value pair with custom labels
+            const labels = {
+                "name": "Original name:",
+                "id": "Registered ID:",
+                "phone": "Contact to him by:"
+            };
+
+            Object.keys(data).forEach(key => {
+                const row = document.createElement('tr');
+                const labelCell = document.createElement('td');
+                const valueCell = document.createElement('td');
+
+                labelCell.textContent = labels[key] || key; // Use custom label if available
+                valueCell.textContent = data[key];
+
+                row.appendChild(labelCell);
+                row.appendChild(valueCell);
+                tableBody.appendChild(row);
+
+                tableData[labels[key] || key] = data[key];
+            });
+
+            // Show the table
+            dataTable.style.display = 'table';
+        }
+
+        // Continuously scan the video for QR codes with performance optimization
+        video.addEventListener('play', () => {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+
+            const scan = () => {
+                const now = Date.now();
+                if (now - lastScanTime > scanInterval) {
+                    lastScanTime = now;
+                    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                        canvas.height = video.videoHeight;
+                        canvas.width = video.videoWidth;
+                        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                        const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+                        if (code) {
+                            try {
+                                // Decrypt the QR code data using the secret key
+                                const decryptedData = decryptData(code.data, decryptionKey);
+
+                                // Log decrypted data for debugging
+                                console.log("Decrypted Data:", decryptedData);
+
+                                // Parse the decrypted data as JSON
+                                const jsonData = JSON.parse(decryptedData);
+
+                                // Display the decrypted data in the table
+                                displayDataInTable(jsonData);
+
+                            } catch (error) {
+                                resultElement.textContent = `Error: Invalid QR Code or Decryption failed.`;
+                            }
+
+                            // Pause the video when a QR code is detected
+                            video.pause();
+                        } else {
+                            resultElement.textContent = "Scanning for QR code...";
+                        }
+                    }
+                }
+                if (!video.paused) {
+                    requestAnimationFrame(scan);
+                }
+            };
+            scan();
+        });
+
+        // Play button fallback for mobile devices that do not autoplay video
+        playButton.addEventListener('click', () => {
+            video.play();
+            playButton.style.display = 'none'; // Hide button after pressing play
+        });
+
+        // Start the video on page load
+        startVideo();
+    </script>
+</body>
+</html>
